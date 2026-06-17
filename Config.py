@@ -554,7 +554,16 @@ class Configurator:
 
             "--windowed",
 
-            "--onedir",
+            "--onefile",
+
+            "--noupx",
+
+            "--runtime-tmpdir",
+
+            os.environ.get(
+                "TEMP",
+                ""
+            ),
 
             "--hidden-import=openpyxl",
 
