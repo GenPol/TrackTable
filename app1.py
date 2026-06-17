@@ -1,15 +1,18 @@
 import os
 import sys
 import shutil
-import sqlite3
 import subprocess
 import hashlib
-from datetime import datetime
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
 
-from openpyxl import load_workbook
-from openpyxl.utils import get_column_letter
+from datetime import datetime
+
+import tkinter as tk
+
+from tkinter import (
+    ttk,
+    messagebox,
+    simpledialog
+)
 
 # ==========================================
 # НАСТРОЙКИ (ЗАПОЛНЯЮТСЯ КОНФИГУРАТОРОМ)
@@ -20,19 +23,113 @@ TEMP_DIR = {{ TEMP_DIR }}
 ADMIN_PASSWORD = "{{ ADMIN_PASSWORD }}"
 # ==========================================
 
+# ==========================================
+# LAZY IMPORTS
+# ==========================================
+
+_sqlite = None
+
+_load_workbook = None
+
+_get_column_letter = None
+
+
+def get_sqlite():
+    global _sqlite
+    if _sqlite is None:
+        import sqlite3
+        _sqlite = sqlite3
+
+        print(
+            "sqlite загружен"
+        )
+    return _sqlite
+
+
+def get_load_workbook():
+
+    global _load_workbook
+
+    if _load_workbook is None:
+
+        from openpyxl import (
+            load_workbook
+        )
+
+        _load_workbook = (
+            load_workbook
+        )
+
+        print(
+            "openpyxl загружен"
+        )
+
+    return _load_workbook
+
+
+def get_column():
+
+    global _get_column_letter
+
+    if _get_column_letter is None:
+
+        from openpyxl.utils import (
+            get_column_letter
+        )
+
+        _get_column_letter = (
+            get_column_letter
+        )
+
+    return _get_column_letter
+
+def preload_modules():
+
+    try:
+
+        get_sqlite()
+
+        get_load_workbook()
+
+        get_column()
+
+        print(
+            "Модули догружены"
+        )
+
+    except Exception as e:
+
+        print(
+            f"Ошибка preload: {e}"
+        )
+
 # ---------- КЭШ БУКВ ----------
+
 _COL_LETTER_CACHE = {}
+
 def col_letter(col_num):
     if col_num not in _COL_LETTER_CACHE:
-        _COL_LETTER_CACHE[col_num] = get_column_letter(col_num)
-    return _COL_LETTER_CACHE[col_num]
+        _COL_LETTER_CACHE[
+            col_num
+        ] = (
+            get_column()(
+                col_num
+            )
+        )
+    return (
+        _COL_LETTER_CACHE[
+            col_num
+        ]
+    )
 
 # ---------- ПУТИ ----------
+
 excel_dir = os.path.dirname(EXCEL_FILE)
 excel_name = os.path.splitext(os.path.basename(EXCEL_FILE))[0]
 LOCK_FILE = os.path.join(excel_dir, f".{excel_name}.lock")
 
 # Основная БД – сначала пытаемся создать рядом с Excel
+
 DB_PATH = os.path.join(excel_dir, "excel_audit.db")
 try:
     test_file = os.path.join(excel_dir, ".write_test")
@@ -58,6 +155,7 @@ def get_secret_db_path():
 BACKUP_DB = get_secret_db_path()
 
 # ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
+
 def get_user():
     return os.environ.get("USERNAME", "UNKNOWN")
 
@@ -98,6 +196,7 @@ def file_hash():
     return h.hexdigest()
 
 # ---------- БАЗА ДАННЫХ ----------
+
 def init_db():
     global DB_PATH
     db_dir = os.path.dirname(DB_PATH)
@@ -119,7 +218,7 @@ def init_db():
             db_dir = os.path.dirname(DB_PATH)
             os.makedirs(db_dir, exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite().connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS main_state (
@@ -160,7 +259,7 @@ def backup_db():
 def add_audit_records(records):
     if not records:
         return
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite().connect(DB_PATH)
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA journal_mode=WAL")
     now = datetime.now().isoformat()
@@ -179,13 +278,14 @@ def add_audit_records(records):
         backup_db()
 
 # ---------- СКАНИРОВАНИЕ И АУДИТ ----------
+
 def full_scan(parent):
     pwd = simpledialog.askstring("Пароль", "Введите пароль администратора:", parent=parent, show='*')
     if pwd != ADMIN_PASSWORD:
         messagebox.showerror("Ошибка", "Неверный пароль!")
         return
 
-    wb = load_workbook(EXCEL_FILE, read_only=True, data_only=False)
+    wb = get_load_workbook()(EXCEL_FILE, read_only=True, data_only=False)
     sheets = wb.sheetnames
     total = len(sheets)
 
@@ -229,12 +329,12 @@ def full_scan(parent):
     wb.close()
     progress_win.destroy()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite().connect(DB_PATH)
     conn.execute("DROP TABLE IF EXISTS main_state")
     conn.close()
     init_db()
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite().connect(DB_PATH)
     cur = conn.cursor()
     cur.executemany("INSERT INTO main_state VALUES(?,?,?,?,?,?,?)", main_records)
     conn.commit()
@@ -246,40 +346,97 @@ def full_scan(parent):
     messagebox.showinfo("Готово", f"База создана ({len(main_records)} ячеек)")
 
 def open_excel_and_wait(file_path):
-    try:
-        subprocess.run(f'cmd /c start /wait excel.exe "{os.path.abspath(file_path)}"',
-                       shell=True, check=True)
-    except subprocess.CalledProcessError:
-        default_paths = [
-            r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
-            r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE",
-        ]
-        for path in default_paths:
-            if os.path.exists(path):
-                subprocess.run([path, os.path.abspath(file_path)], check=True)
-                return
-        raise RuntimeError("Microsoft Excel не найден")
 
-def lock():
-    if os.path.exists(LOCK_FILE) and is_lock_stale():
+    file_path = os.path.abspath(file_path)
+
+    excel_paths = [
+
+        "excel.exe",
+
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+
+        r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE"
+
+    ]
+
+    for excel in excel_paths:
+
         try:
-            os.remove(LOCK_FILE)
+
+            proc = subprocess.Popen(
+                [excel, file_path]
+            )
+
+            proc.wait()
+
+            return
+
         except:
             pass
+
+    raise RuntimeError(
+        "Excel не найден"
+    )
+
+def lock():
     if os.path.exists(LOCK_FILE):
-        return False
-    with open(LOCK_FILE, 'w') as f:
-        f.write(f"{get_user()}\n{datetime.now().isoformat()}")
+        if is_lock_stale():
+            try:
+                os.remove(
+                    LOCK_FILE
+                )
+            except:
+                return False
+        else:
+            return False
+    with open(
+        LOCK_FILE,
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(
+            get_user()
+        )
+        f.write("\n")
+        f.write(
+            datetime.now().isoformat()
+        )
+        f.write("\n")
+        f.write(
+            "EDIT_OR_UPDATE"
+        )
     return True
 
 def unlock():
-    if os.path.exists(LOCK_FILE):
-        os.remove(LOCK_FILE)
+    try:
+        if os.path.exists(
+            LOCK_FILE
+        ):
+            os.remove(
+                LOCK_FILE
+            )
+    except:
+        pass
 
 def make_copy():
-    os.makedirs(TEMP_DIR, exist_ok=True)
-    dst = os.path.join(TEMP_DIR, os.path.basename(EXCEL_FILE))
-    shutil.copy2(EXCEL_FILE, dst)
+
+    temp = os.path.abspath(TEMP_DIR)
+
+    os.makedirs(
+        temp,
+        exist_ok=True
+    )
+
+    dst = os.path.join(
+        temp,
+        os.path.basename(EXCEL_FILE)
+    )
+
+    shutil.copy2(
+        EXCEL_FILE,
+        dst
+    )
+
     return dst
 
 def open_copy():
@@ -305,12 +462,23 @@ def open_copy():
 def background_audit():
     if not lock():
         return
-    try:
-        open_excel_and_wait(EXCEL_FILE)
 
-        wb = load_workbook(EXCEL_FILE, read_only=True, data_only=False)
+    try:
+        print("Открытие Excel...")
+        # Предзагрузка модулей (не блокирует)
+        import threading
+        thread = threading.Thread(target=preload_modules, daemon=True)
+        thread.start()
+
+        open_excel_and_wait(EXCEL_FILE)
+        thread.join()
+        print("Excel закрыт")
+
+        print("Начинается аудит...")
+        wb = get_load_workbook()(EXCEL_FILE, read_only=True, data_only=False)
         sheets = wb.sheetnames
         current_state = []
+
         for sheet_name in sheets:
             ws = wb[sheet_name]
             rows_iter = ws.iter_rows(values_only=True)
@@ -329,8 +497,10 @@ def background_audit():
                     col_title = str(headers[c_num-1]) if c_num-1 < len(headers) and headers[c_num-1] is not None else ""
                     current_state.append((sheet_name, r_num, c_num, str(value), col_letter_str, col_title, row_title))
         wb.close()
+        print("Сканирование завершено")
 
-        conn = sqlite3.connect(DB_PATH)
+        # Получаем старый эталон из БД
+        conn = get_sqlite().connect(DB_PATH)
         cur = conn.cursor()
         cur.execute("SELECT sheet, row_num, col_num, value, col_letter, col_title, row_title FROM main_state")
         old_rows = cur.fetchall()
@@ -351,6 +521,7 @@ def background_audit():
                                     row, row_title, old_val, new_val))
             new_state_dict[key] = (sheet, row, col, new_val, col_letter_str, col_title, row_title)
 
+        # Удалённые ячейки
         for key, (old_val, cl, ct, rt) in old_dict.items():
             if key not in new_state_dict:
                 sheet, row, col = key
@@ -359,7 +530,11 @@ def background_audit():
 
         if changes:
             add_audit_records(changes)
+            print(f"Записано {len(changes)} изменений")
+        else:
+            print("Изменений не найдено")
 
+        # Обновляем эталон
         cur.execute("BEGIN TRANSACTION")
         data = list(new_state_dict.values())
         cur.executemany("""
@@ -372,11 +547,14 @@ def background_audit():
             cur.executemany("DELETE FROM main_state WHERE sheet=? AND row_num=? AND col_num=?", to_delete)
         conn.commit()
         conn.close()
+        print("База обновлена")
+
     finally:
+        print("Снятие блокировки")
         unlock()
 
 def check_has_main():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlite().connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='main_state'")
     if cur.fetchone()[0] == 0:
@@ -411,32 +589,60 @@ class App:
         self.update_status()
 
     def update_status(self):
-        if check_has_main():
+        try:
+            state = check_has_main()
+        except:
+            state = False
+
+        if state:
             self.status_label.config(text="✅ База создана", fg="green")
         else:
             self.status_label.config(text="⚠️ База не создана. Нажмите 'Создать базу'", fg="red")
         self.root.after(5000, self.update_status)
 
     def on_edit_original(self):
+
         if os.path.exists(LOCK_FILE):
-            force_remove_stale_lock()
-            if os.path.exists(LOCK_FILE):
-                info = get_lock_info()
-                if info:
-                    owner, start_time = info
-                    minutes = round((datetime.now()-start_time).total_seconds()/60, 1)
-                    msg = f"Оригинал редактирует {owner} уже {minutes} мин.\nОткрыть копию?"
-                else:
-                    msg = "Оригинал занят.\nОткрыть копию?"
-                if messagebox.askyesno("Файл занят", msg):
-                    self.on_copy()
-                return
+
+            info = get_lock_info()
+
+            if info:
+
+                owner, _ = info
+
+                messagebox.showwarning(
+                    "Файл занят",
+                    (
+                        "Сейчас выполняется обновление базы.\n\n"
+                        f"Пользователь:\n{owner}"
+                    )
+                )
+
+            else:
+
+                messagebox.showwarning(
+                    "Файл занят",
+                    "Подождите завершения обновления"
+                )
+
+            return
 
         self.root.withdraw()
+
         try:
+
             background_audit()
-        finally:
+
             self.root.destroy()
+
+        except Exception as e:
+
+            self.root.deiconify()
+
+            messagebox.showerror(
+                "Ошибка",
+                str(e)
+            )
 
     def on_copy(self):
         open_copy()
@@ -448,7 +654,6 @@ if __name__ == "__main__":
         background_audit()
         sys.exit(0)
 
-    init_db()
     root = tk.Tk()
     app = App(root)
     root.mainloop()
