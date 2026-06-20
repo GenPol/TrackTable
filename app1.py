@@ -349,33 +349,43 @@ def open_excel_and_wait(file_path):
 
     file_path = os.path.abspath(file_path)
 
-    excel_paths = [
+    try:
 
-        "excel.exe",
+        subprocess.run(
+            f'cmd /c start /wait excel.exe "{file_path}"',
+            shell=True,
+            check=True
+        )
 
-        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        return
 
-        r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE"
+    except:
 
-    ]
+        excel_paths = [
 
-    for excel in excel_paths:
+            r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
 
-        try:
+            r"C:\Program Files (x86)\Microsoft Office\root\Office16\EXCEL.EXE"
 
-            proc = subprocess.Popen(
-                [excel, file_path]
-            )
+        ]
 
-            proc.wait()
+        for excel in excel_paths:
 
-            return
+            try:
 
-        except:
-            pass
+                subprocess.run(
+                    [excel, file_path],
+                    check=True
+                )
+
+                return
+
+            except:
+
+                pass
 
     raise RuntimeError(
-        "Excel не найден"
+        "Microsoft Excel не найден"
     )
 
 def lock():
@@ -554,16 +564,41 @@ def background_audit():
         unlock()
 
 def check_has_main():
-    conn = get_sqlite().connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='main_state'")
-    if cur.fetchone()[0] == 0:
+
+    try:
+
+        conn = get_sqlite().connect(DB_PATH)
+
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT count(*)
+            FROM sqlite_master
+            WHERE type='table'
+            AND name='main_state'
+            """
+        )
+
+        if cur.fetchone()[0] == 0:
+
+            conn.close()
+
+            return False
+
+        cur.execute(
+            "SELECT count(*) FROM main_state"
+        )
+
+        count = cur.fetchone()[0]
+
         conn.close()
+
+        return count > 0
+
+    except:
+
         return False
-    cur.execute("SELECT count(*) FROM main_state")
-    count = cur.fetchone()[0]
-    conn.close()
-    return count > 0
 
 # ---------- GUI ----------
 class App:
@@ -650,10 +685,28 @@ class App:
 
 # ---------- ЗАПУСК ----------
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == '--background-original':
+
+    try:
+        init_db()
+
+    except Exception as e:
+
+        print(
+            f"Ошибка инициализации БД: {e}"
+        )
+
+    if (
+        len(sys.argv) > 1
+        and
+        sys.argv[1] == "--background-original"
+    ):
+
         background_audit()
+
         sys.exit(0)
 
     root = tk.Tk()
+
     app = App(root)
+
     root.mainloop()
