@@ -558,13 +558,6 @@ class Configurator:
 
             "--noupx",
 
-            "--runtime-tmpdir",
-
-            os.environ.get(
-                "TEMP",
-                ""
-            ),
-
             "--hidden-import=openpyxl",
 
             "--hidden-import=openpyxl.cell",
